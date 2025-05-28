@@ -19,6 +19,18 @@ config SENS_MQTT_URI
     help
         Address of the MQTT broker
 
+config SENS_MQTT_USERNAME
+    string "MQTT username"
+    default "your_username"
+    help
+        Username for MQTT broker authentication
+
+config SENS_MQTT_PASSWORD
+    string "MQTT password"
+    default "your_password"
+    help
+        Password for MQTT broker authentication
+
 config SENS_TOPIC_PREFIX
     string "MQTT topic prefix"
     default "sensdot"

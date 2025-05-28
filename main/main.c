@@ -1,4 +1,3 @@
-
 // main.c — logic for sleep, wakeup, sensor reading, and MQTT reporting for ESP32 (ESP-32S)
 
 #include <stdio.h>
@@ -39,6 +38,8 @@ RTC_DATA_ATTR static time_t last_alarm_time = 0;
 #define ALARM_HOLD_SEC CONFIG_SENS_ALARM_HOLD_SEC
 #define MQTT_URI CONFIG_SENS_MQTT_URI
 #define MQTT_TOPIC_PREFIX CONFIG_SENS_TOPIC_PREFIX
+#define MQTT_USERNAME CONFIG_SENS_MQTT_USERNAME
+#define MQTT_PASSWORD CONFIG_SENS_MQTT_PASSWORD
 #define WIFI_SSID CONFIG_SENS_WIFI_SSID
 #define WIFI_PASS CONFIG_SENS_WIFI_PASS
 #define LOW_BATT_THRESHOLD 3.3f          // Voltage threshold for low battery warning
@@ -81,20 +82,54 @@ static void mqtt_publish(const char *topic, const char *value) {
     }
 }
 
+// Initialize MQTT with authentication
+static void mqtt_init() {
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = MQTT_URI,
+        .credentials.username = MQTT_USERNAME,
+        .credentials.password = MQTT_PASSWORD
+    };
+    mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_start(mqtt_client);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    mqtt_discovery();
+}
+
 // Register MQTT discovery configurations for Home Assistant
 static void mqtt_discovery() {
     mqtt_publish("homeassistant/sensor/sensdot_temp/config",
-        "{"name":"SensDot Temp","state_topic":"sensdot/temp","unit_of_measurement":"°C","device_class":"temperature"}");
+        "{\"name\":\"SensDot Temp\",\"state_topic\":\"sensdot/temp\",\"unit_of_measurement\":\"°C\",\"device_class\":\"temperature\"}");
     mqtt_publish("homeassistant/sensor/sensdot_hum/config",
-        "{"name":"SensDot Humidity","state_topic":"sensdot/hum","unit_of_measurement":"%","device_class":"humidity"}");
+        "{\"name\":\"SensDot Humidity\",\"state_topic\":\"sensdot/hum\",\"unit_of_measurement\":\"%\",\"device_class\":\"humidity\"}");
     mqtt_publish("homeassistant/sensor/sensdot_press/config",
-        "{"name":"SensDot Pressure","state_topic":"sensdot/press","unit_of_measurement":"hPa","device_class":"pressure"}");
+        "{\"name\":\"SensDot Pressure\",\"state_topic\":\"sensdot/press\",\"unit_of_measurement\":\"hPa\",\"device_class\":\"pressure\"}");
     mqtt_publish("homeassistant/sensor/sensdot_light/config",
-        "{"name":"SensDot Light","state_topic":"sensdot/light","unit_of_measurement":"lx","device_class":"illuminance"}");
+        "{\"name\":\"SensDot Light\",\"state_topic\":\"sensdot/light\",\"unit_of_measurement\":\"lx\",\"device_class\":\"illuminance\"}");
     mqtt_publish("homeassistant/binary_sensor/sensdot_alarm/config",
-        "{"name":"SensDot Alarm","state_topic":"sensdot/alarm","device_class":"motion","payload_on":"on","payload_off":"off"}");
+        "{\"name\":\"SensDot Alarm\",\"state_topic\":\"sensdot/alarm\",\"device_class\":\"motion\",\"payload_on\":\"on\",\"payload_off\":\"off\"}");
     mqtt_publish("homeassistant/sensor/sensdot_battery/config",
-        "{"name":"SensDot Battery","state_topic":"sensdot/battery","unit_of_measurement":"V","device_class":"voltage"}");
+        "{\"name\":\"SensDot Battery\",\"state_topic\":\"sensdot/battery\",\"unit_of_measurement\":\"V\",\"device_class\":\"voltage\"}");
     mqtt_publish("homeassistant/binary_sensor/sensdot_low_batt/config",
-        "{"name":"SensDot Low Battery","state_topic":"sensdot/low_batt","device_class":"battery","payload_on":"on","payload_off":"off"}");
+        "{\"name\":\"SensDot Low Battery\",\"state_topic\":\"sensdot/low_batt\",\"device_class\":\"battery\",\"payload_on\":\"on\",\"payload_off\":\"off\"}");
 }
+
+// Add battery check and warning signal
+float battery_voltage = read_battery_voltage();
+char payload[64];
+snprintf(payload, sizeof(payload), "%.2f", battery_voltage);
+mqtt_publish_rel("battery", payload);
+
+if (battery_voltage < LOW_BATT_THRESHOLD) {
+    mqtt_publish_rel("low_batt", "on");
+    blink_and_beep(); // Blink and beep only if battery is low
+} else {
+    mqtt_publish_rel("low_batt", "off");
+}
+
+// Final operations before sleep
+ESP_LOGI(TAG, "Sleeping for %d seconds", WAKE_INTERVAL_SEC);
+esp_wifi_stop(); // Disable Wi-Fi to save power
+esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_AUTO);
+esp_sleep_enable_timer_wakeup(WAKE_INTERVAL_SEC * 1000000ULL);
+esp_sleep_enable_ext0_wakeup(PIR_GPIO, 1); // Wake on PIR trigger
+esp_deep_sleep_start();
