@@ -1,0 +1,45 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "ESP-IDF: Build",
+        "type": "espidf",
+        "request": "launch",
+        "target": "esp32",
+        "command": "build",
+        "projectDir": "${workspaceFolder}",
+        "idfAdapterTarget": "esp32"
+      },
+      {
+        "name": "ESP-IDF: Flash",
+        "type": "espidf",
+        "request": "launch",
+        "target": "esp32",
+        "command": "flash",
+        "projectDir": "${workspaceFolder}",
+        "idfAdapterTarget": "esp32",
+        "port": "COM4"
+      },
+      {
+        "name": "ESP-IDF: Monitor",
+        "type": "espidf",
+        "request": "launch",
+        "target": "esp32",
+        "command": "monitor",
+        "projectDir": "${workspaceFolder}",
+        "idfAdapterTarget": "esp32",
+        "port": "COM4"
+      },
+      {
+        "name": "ESP-IDF: Flash & Monitor",
+        "type": "espidf",
+        "request": "launch",
+        "target": "esp32",
+        "command": "flash_monitor",
+        "projectDir": "${workspaceFolder}",
+        "idfAdapterTarget": "esp32",
+        "port": "COM4"
+      }
+    ]
+  }
+  

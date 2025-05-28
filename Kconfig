@@ -1,0 +1,40 @@
+
+menu "SensDot Configuration"
+
+config SENS_WAKE_INTERVAL_SEC
+    int "Wake interval (seconds)"
+    default 30
+    help
+        Interval between wake cycles
+
+config SENS_ALARM_HOLD_SEC
+    int "Alarm hold timeout (seconds)"
+    default 10
+    help
+        Time to hold alarm state after trigger
+
+config SENS_MQTT_URI
+    string "MQTT broker URI"
+    default "mqtt://192.168.1.100"
+    help
+        Address of the MQTT broker
+
+config SENS_TOPIC_PREFIX
+    string "MQTT topic prefix"
+    default "sensdot"
+    help
+        Base topic prefix for publishing sensor data
+
+config SENS_WIFI_SSID
+    string "Wi-Fi SSID"
+    default "YourSSID"
+    help
+        SSID of the Wi-Fi network
+
+config SENS_WIFI_PASS
+    string "Wi-Fi password"
+    default "YourPassword"
+    help
+        Password for the Wi-Fi network
+
+endmenu
