@@ -1,52 +1,66 @@
-
 menu "SensDot Configuration"
 
-config SENS_WAKE_INTERVAL_SEC
-    int "Wake interval (seconds)"
-    default 30
-    help
-        Interval between wake cycles
+    config SENS_WAKE_INTERVAL_SEC
+        int "Default wake interval (seconds)"
+        default 300
+        range 60 3600
+        help
+            Default interval between wake cycles. Can be changed via web interface.
+            Minimum 60 seconds, maximum 1 hour.
 
-config SENS_ALARM_HOLD_SEC
-    int "Alarm hold timeout (seconds)"
-    default 10
-    help
-        Time to hold alarm state after trigger
+    config SENS_ALARM_HOLD_SEC  
+        int "Default alarm hold timeout (seconds)"
+        default 60
+        range 10 300
+        help
+            Default time to hold alarm state after PIR trigger. Can be changed via web interface.
+            Minimum 10 seconds, maximum 5 minutes.
 
-config SENS_MQTT_URI
-    string "MQTT broker URI"
-    default "mqtt://192.168.1.100"
-    help
-        Address of the MQTT broker
+    config SENS_LOW_BATT_THRESHOLD
+        int "Default low battery threshold (millivolts)"
+        default 3300
+        range 3000 4200
+        help
+            Default voltage threshold for low battery warning in millivolts.
+            Can be changed via web interface. Range 3.0V - 4.2V.
 
-config SENS_MQTT_USERNAME
-    string "MQTT username"
-    default "your_username"
-    help
-        Username for MQTT broker authentication
+    config SENS_SETUP_TIMEOUT_MIN
+        int "Setup mode timeout (minutes)"
+        default 10
+        range 5 30
+        help
+            Time in minutes before setup mode automatically exits to save battery.
+            Minimum 5 minutes, maximum 30 minutes.
 
-config SENS_MQTT_PASSWORD
-    string "MQTT password"
-    default "your_password"
-    help
-        Password for MQTT broker authentication
+    config SENS_SETUP_AP_PASSWORD
+        string "Setup AP password"
+        default "sensdot123"
+        help
+            Password for setup access point. Leave empty for open network.
+            Minimum 8 characters if set.
 
-config SENS_TOPIC_PREFIX
-    string "MQTT topic prefix"
-    default "sensdot"
-    help
-        Base topic prefix for publishing sensor data
+    config SENS_VOLTAGE_DIVIDER_RATIO
+        int "Battery voltage divider ratio (x100)"
+        default 200
+        range 100 500
+        help
+            Voltage divider ratio multiplied by 100. Default 200 = 2.0 ratio.
+            Adjust based on your hardware design.
 
-config SENS_WIFI_SSID
-    string "Wi-Fi SSID"
-    default "YourSSID"
-    help
-        SSID of the Wi-Fi network
+    config SENS_MAX_WIFI_RETRIES
+        int "Maximum WiFi connection retries before entering setup"
+        default 5
+        range 3 10
+        help
+            Number of consecutive WiFi connection failures before automatically
+            entering setup mode. Helps with network issues.
 
-config SENS_WIFI_PASS
-    string "Wi-Fi password"
-    default "YourPassword"
-    help
-        Password for the Wi-Fi network
+    config SENS_MQTT_DISCOVERY_INTERVAL
+        int "MQTT Discovery interval (boots)"
+        default 10
+        range 1 50
+        help
+            Send Home Assistant MQTT discovery messages every N boots.
+            Set to 1 to send on every boot (more reliable but uses more power).
 
 endmenu
