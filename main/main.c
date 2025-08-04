@@ -24,6 +24,48 @@ RTC_DATA_ATTR static device_state_t device_state = DEVICE_STATE_INIT;
 static device_config_t current_config;
 
 /**
+ * @brief Check for factory reset request (using built-in BOOT button)
+ * @return true if factory reset requested, false otherwise
+ */
+static bool check_factory_reset_request(void)
+{
+    // Use built-in BOOT button on GPIO9 for factory reset
+    gpio_config_t button_config = {
+        .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    
+    esp_err_t ret = gpio_config(&button_config);
+    if (ret != ESP_OK) {
+        SENSDOT_LOGE(TAG, "Failed to configure boot button GPIO: %s", esp_err_to_name(ret));
+        return false;
+    }
+    
+    // Check if boot button is held during startup (button is active LOW)
+    if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+        SENSDOT_LOGI(TAG, "Factory reset button detected");
+        
+        // Wait for button to be held for 5 seconds
+        int hold_time = 0;
+        while (gpio_get_level(BOOT_BUTTON_GPIO) == 0 && hold_time < 5000) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            hold_time += 100;
+        }
+        
+        if (hold_time >= 5000) {
+            SENSDOT_LOGI(TAG, "Factory reset requested");
+            indicators_show_factory_reset();
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
  * @brief Initialize system components
  * @return ESP_OK on success, error code otherwise
  */
@@ -31,7 +73,7 @@ static esp_err_t system_init(void)
 {
     esp_err_t ret;
     
-    SENSDOT_LOGI(TAG, "Initializing SensDot v%s for ESP32-C3 Super Mini", SENSDOT_VERSION_STRING);
+    SENSDOT_LOGI(TAG, "Initializing SensDot v%s for ESP32-C3", SENSDOT_VERSION_STRING);
     SENSDOT_LOGI(TAG, "Boot count: %lu", boot_count);
     
     // Initialize NVS
@@ -79,6 +121,28 @@ static esp_err_t system_init(void)
     
     SENSDOT_LOGI(TAG, "System initialization completed");
     return ESP_OK;
+}
+
+/**
+ * @brief Perform factory reset
+ */
+static void perform_factory_reset(void)
+{
+    SENSDOT_LOGI(TAG, "Performing factory reset");
+    
+    // Reset all configurations
+    config_factory_reset();
+    power_reset_config();
+    indicators_reset_config();
+    
+    // Clear RTC memory
+    boot_count = 0;
+    last_alarm_time = 0;
+    device_state = DEVICE_STATE_INIT;
+    
+    SENSDOT_LOGI(TAG, "Factory reset completed, restarting...");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    esp_restart();
 }
 
 /**
@@ -165,7 +229,7 @@ static esp_err_t connect_to_services(void)
     }
     
     // Wait for WiFi connection
-    ret = wifi_wait_connection(10000); // 10 second timeout
+    ret = wifi_wait_connection(WIFI_CONNECT_TIMEOUT_MS);
     if (ret != ESP_OK) {
         SENSDOT_LOGE(TAG, "WiFi connection failed: %s", esp_err_to_name(ret));
         
@@ -222,8 +286,8 @@ static esp_err_t read_and_publish_data(void)
         return ret;
     }
     
-    // Wait for sensors to stabilize
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Wait for sensors to stabilize (longer for BMP280)
+    vTaskDelay(pdMS_TO_TICKS(500));
     
     // Read all sensor data
     ret = sensors_read_all(&sensor_data);
@@ -315,7 +379,7 @@ static esp_err_t normal_operation(void)
     SENSDOT_LOGI(TAG, "Entering deep sleep for %d seconds", current_config.wake_interval_sec);
     device_state = DEVICE_STATE_SLEEP;
     
-    // Configure wake up sources - only timer and PIR for ESP32-C3
+    // Configure wake up sources (ESP32-C3 specific)
     uint32_t wakeup_sources = WAKEUP_SOURCE_TIMER | WAKEUP_SOURCE_PIR;
     power_prepare_for_sleep(current_config.wake_interval_sec, wakeup_sources);
     
@@ -356,11 +420,11 @@ static esp_err_t determine_operating_mode(void)
             break;
             
         case WAKEUP_REASON_PIR:
-            SENSDOT_LOGI(TAG, "Woke up from PIR sensor - motion detected!");
+            SENSDOT_LOGI(TAG, "Woke up from PIR sensor");
             break;
             
         case WAKEUP_REASON_RESET:
-            SENSDOT_LOGI(TAG, "Woke up from reset/power-on");
+            SENSDOT_LOGI(TAG, "Woke up from reset");
             break;
             
         default:
@@ -382,6 +446,12 @@ void app_main(void)
     
     // Increment boot counter
     boot_count++;
+    
+    // Check for factory reset request (using BOOT button)
+    if (check_factory_reset_request()) {
+        perform_factory_reset();
+        return; // Should not reach here
+    }
     
     // Initialize system components
     ret = system_init();

@@ -1,10 +1,11 @@
 /**
  * @file wifi_manager.c
- * @brief WiFi connection management implementation for SensDot device
+ * @brief WiFi connection management implementation for SensDot device (ESP32-C3 fixed)
  */
 
 #include "wifi_manager.h"
 #include "sensdot_common.h"
+#include "esp_wifi.h"  // For WiFi API and event structures
 
 static const char *TAG = "wifi_mgr";
 
@@ -93,14 +94,20 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
             case WIFI_EVENT_AP_STACONNECTED:
                 {
                     wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-                    SENSDOT_LOGI(TAG, "Station connected to AP, MAC: " MACSTR, MAC2STR(event->mac));
+                    // Fix MACSTR concatenation issue by using format specifiers directly
+                    SENSDOT_LOGI(TAG, "Station connected to AP, MAC: %02x:%02x:%02x:%02x:%02x:%02x", 
+                                event->mac[0], event->mac[1], event->mac[2], 
+                                event->mac[3], event->mac[4], event->mac[5]);
                 }
                 break;
                 
             case WIFI_EVENT_AP_STADISCONNECTED:
                 {
                     wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-                    SENSDOT_LOGI(TAG, "Station disconnected from AP, MAC: " MACSTR, MAC2STR(event->mac));
+                    // Fix MACSTR concatenation issue by using format specifiers directly
+                    SENSDOT_LOGI(TAG, "Station disconnected from AP, MAC: %02x:%02x:%02x:%02x:%02x:%02x", 
+                                event->mac[0], event->mac[1], event->mac[2], 
+                                event->mac[3], event->mac[4], event->mac[5]);
                 }
                 break;
                 
@@ -615,7 +622,10 @@ esp_err_t wifi_get_mac_address(char *mac_str, size_t max_len)
         return ret;
     }
     
-    snprintf(mac_str, max_len, MACSTR, MAC2STR(mac));
+    // Fix MAC address formatting without using MACSTR macro
+    snprintf(mac_str, max_len, "%02x:%02x:%02x:%02x:%02x:%02x", 
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
     return ESP_OK;
 }
 

@@ -1,11 +1,12 @@
 /**
  * @file power_management.c
- * @brief Power management and sleep functionality for ESP32-C3 (no ULP)
+ * @brief Power management and sleep functionality implementation
  */
 
 #include "power_management.h"
 #include "sensdot_common.h"
 #include "config.h"
+#include "esp_system.h"
 
 static const char *TAG = "power_mgr";
 
@@ -28,7 +29,7 @@ static esp_err_t configure_power_domains(void);
 static esp_err_t update_sleep_stats(void);
 
 /**
- * @brief Determine wake up reason from ESP32-C3 wake up cause
+ * @brief Determine wake up reason from ESP32 wake up cause
  */
 static wakeup_reason_t determine_wakeup_reason(void)
 {
@@ -39,22 +40,35 @@ static wakeup_reason_t determine_wakeup_reason(void)
             return WAKEUP_REASON_TIMER;
             
         case ESP_SLEEP_WAKEUP_EXT0:
-            // EXT0 configured for PIR sensor on GPIO4
-            g_last_wakeup_gpio = PIR_GPIO;
-            return WAKEUP_REASON_PIR;
-            
         case ESP_SLEEP_WAKEUP_EXT1:
-            // ESP32-C3 has limited EXT1 support, not used in this project
-            return WAKEUP_REASON_UNKNOWN;
+            // Check which GPIO caused the wakeup
+            if (wakeup_cause == ESP_SLEEP_WAKEUP_EXT0) {
+                g_last_wakeup_gpio = PIR_GPIO; // EXT0 is configured for PIR
+                return WAKEUP_REASON_PIR;
+            } else {
+                uint64_t wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
+                if (wakeup_pin_mask & (1ULL << BOOT_BUTTON_GPIO)) {
+                    g_last_wakeup_gpio = BOOT_BUTTON_GPIO;
+                    return WAKEUP_REASON_RESET;
+                }
+                // Could be other GPIO sources
+                return WAKEUP_REASON_UNKNOWN;
+            }
+            
+        case ESP_SLEEP_WAKEUP_TOUCHPAD:
+            return WAKEUP_REASON_UNKNOWN; // Not used in this project
+            
+        case ESP_SLEEP_WAKEUP_ULP:
+            return WAKEUP_REASON_UNKNOWN; // ULP not available on ESP32-C3
             
         case ESP_SLEEP_WAKEUP_UNDEFINED:
         default:
-            return WAKEUP_REASON_RESET; // Power-on or reset
+            return WAKEUP_REASON_RESET; // Assume reset/power-on
     }
 }
 
 /**
- * @brief Configure power domains for optimal energy consumption on ESP32-C3
+ * @brief Configure power domains for optimal energy consumption
  */
 static esp_err_t configure_power_domains(void)
 {
@@ -67,7 +81,7 @@ static esp_err_t configure_power_domains(void)
         return ret;
     }
     
-    // Configure RTC slow memory power domain (keep for RTC_DATA_ATTR variables)
+    // Configure RTC slow memory power domain
     ret = esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, g_power_config.rtc_slow_mem_pd);
     if (ret != ESP_OK) {
         SENSDOT_LOGE(TAG, "Failed to configure RTC slow mem power domain: %s", esp_err_to_name(ret));
@@ -81,7 +95,7 @@ static esp_err_t configure_power_domains(void)
         return ret;
     }
     
-    // Configure flash power down if enabled (for minimal power consumption)
+    // Configure flash power down if enabled
     if (g_power_config.power_down_flash) {
         ret = esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_OFF);
         if (ret != ESP_OK) {
@@ -111,11 +125,11 @@ static esp_err_t update_sleep_stats(void)
 }
 
 /**
- * @brief Initialize power management for ESP32-C3
+ * @brief Initialize power management
  */
 esp_err_t power_management_init(void)
 {
-    SENSDOT_LOGI(TAG, "Initializing power management for ESP32-C3");
+    SENSDOT_LOGI(TAG, "Initializing power management");
     
     if (g_power_initialized) {
         SENSDOT_LOGW(TAG, "Power management already initialized");
@@ -168,197 +182,8 @@ esp_err_t power_set_mode(power_mode_t mode)
         return SENSDOT_ERR_INVALID_STATE;
     }
     
-    SENSDOT_LOGD(TAG, "Setting power mode: %d", mode);
-    
-    esp_err_t ret = ESP_OK;
-    
-    switch (mode) {
-        case POWER_MODE_NORMAL:
-            // Normal operation - no special power saving
-            break;
-            
-        case POWER_MODE_LOW_POWER:
-            // Enable automatic light sleep on ESP32-C3
-            ret = power_set_automatic_light_sleep(true, 80); // Min 80MHz
-            break;
-            
-        case POWER_MODE_DEEP_SLEEP:
-            // This mode is handled by power_enter_deep_sleep()
-            break;
-            
-        case POWER_MODE_LIGHT_SLEEP:
-            // This mode is handled by power_enter_light_sleep()
-            break;
-            
-        default:
-            SENSDOT_LOGE(TAG, "Invalid power mode: %d", mode);
-            return SENSDOT_ERR_INVALID_ARG;
-    }
-    
-    if (ret == ESP_OK) {
-        g_current_mode = mode;
-    }
-    
-    return ret;
-}
-
-/**
- * @brief Get current power mode
- */
-power_mode_t power_get_mode(void)
-{
-    return g_current_mode;
-}
-
-/**
- * @brief Enter deep sleep (main sleep mode for ESP32-C3)
- */
-void power_enter_deep_sleep(uint32_t sleep_time_sec)
-{
-    SENSDOT_LOGI(TAG, "Entering deep sleep for %lu seconds", sleep_time_sec);
-    
-    // Record sleep start time
-    g_last_sleep_start = esp_timer_get_time();
-    g_sleep_stats.last_sleep_time = time(NULL);
-    g_sleep_stats.deep_sleep_count++;
-    
-    // Configure wake up sources based on configuration
-    uint32_t sources = WAKEUP_SOURCE_TIMER;
-    if (g_power_config.enable_pir_wakeup) {
-        sources |= WAKEUP_SOURCE_PIR;
-    }
-    
-    power_prepare_for_sleep(sleep_time_sec, sources);
-    
-    // Enter deep sleep - this function does not return
-    esp_deep_sleep_start();
-}
-
-/**
- * @brief Enter light sleep
- */
-esp_err_t power_enter_light_sleep(uint32_t sleep_time_ms)
-{
-    if (!g_power_initialized) {
-        return SENSDOT_ERR_INVALID_STATE;
-    }
-    
-    SENSDOT_LOGD(TAG, "Entering light sleep for %lu ms", sleep_time_ms);
-    
-    // Record sleep start time
-    uint64_t sleep_start = esp_timer_get_time();
-    g_sleep_stats.light_sleep_count++;
-    
-    // Configure timer wake up
-    esp_err_t ret = esp_sleep_enable_timer_wakeup(sleep_time_ms * 1000ULL);
-    if (ret != ESP_OK) {
-        SENSDOT_LOGE(TAG, "Failed to enable timer wakeup: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
-    // Enter light sleep
-    ret = esp_light_sleep_start();
-    if (ret != ESP_OK) {
-        SENSDOT_LOGE(TAG, "Light sleep failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
-    // Update sleep statistics
-    uint64_t sleep_duration = esp_timer_get_time() - sleep_start;
-    g_sleep_stats.total_sleep_time_us += sleep_duration;
-    
-    SENSDOT_LOGD(TAG, "Light sleep completed, duration: %llu us", sleep_duration);
+    SENSDOT_LOGD(TAG, "EXT1 wakeup enabled, mask=0x%llx, mode=%d", mask, mode);
     return ESP_OK;
-}
-
-/**
- * @brief Configure wake up sources for ESP32-C3
- */
-esp_err_t power_configure_wakeup_sources(uint32_t sources)
-{
-    esp_err_t ret = ESP_OK;
-    
-    SENSDOT_LOGD(TAG, "Configuring wakeup sources: 0x%lx", sources);
-    
-    // Disable all wakeup sources first
-    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-    
-    // Configure timer wakeup
-    if (sources & WAKEUP_SOURCE_TIMER && g_power_config.enable_timer_wakeup) {
-        ret = power_enable_timer_wakeup(g_power_config.wake_interval_sec);
-        if (ret != ESP_OK) {
-            SENSDOT_LOGE(TAG, "Failed to enable timer wakeup: %s", esp_err_to_name(ret));
-            return ret;
-        }
-    }
-    
-    // Configure PIR sensor wakeup (EXT0) - main feature for motion detection
-    if (sources & WAKEUP_SOURCE_PIR && g_power_config.enable_pir_wakeup) {
-        ret = power_enable_ext0_wakeup(PIR_GPIO, 1); // Wake on HIGH level
-        if (ret != ESP_OK) {
-            SENSDOT_LOGE(TAG, "Failed to enable PIR wakeup: %s", esp_err_to_name(ret));
-            return ret;
-        }
-    }
-    
-    return ESP_OK;
-}
-
-/**
- * @brief Enable timer wake up
- */
-esp_err_t power_enable_timer_wakeup(uint32_t time_sec)
-{
-    if (time_sec == 0) {
-        SENSDOT_LOGW(TAG, "Timer wakeup disabled (0 seconds)");
-        return ESP_OK;
-    }
-    
-    uint64_t time_us = (uint64_t)time_sec * 1000000ULL;
-    esp_err_t ret = esp_sleep_enable_timer_wakeup(time_us);
-    if (ret != ESP_OK) {
-        SENSDOT_LOGE(TAG, "Failed to enable timer wakeup: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
-    SENSDOT_LOGD(TAG, "Timer wakeup enabled for %lu seconds", time_sec);
-    return ESP_OK;
-}
-
-/**
- * @brief Enable external wake up (PIR sensor) - critical for ESP32-C3
- */
-esp_err_t power_enable_ext0_wakeup(gpio_num_t gpio_num, int level)
-{
-    // Configure GPIO as RTC IO (GPIO4 supports RTC on ESP32-C3)
-    if (rtc_gpio_is_valid_gpio(gpio_num)) {
-        rtc_gpio_init(gpio_num);
-        rtc_gpio_set_direction(gpio_num, RTC_GPIO_MODE_INPUT_ONLY);
-        rtc_gpio_pulldown_en(gpio_num);
-        rtc_gpio_pullup_dis(gpio_num);
-    } else {
-        SENSDOT_LOGE(TAG, "GPIO%d does not support RTC wake-up on ESP32-C3", gpio_num);
-        return SENSDOT_ERR_INVALID_ARG;
-    }
-    
-    esp_err_t ret = esp_sleep_enable_ext0_wakeup(gpio_num, level);
-    if (ret != ESP_OK) {
-        SENSDOT_LOGE(TAG, "Failed to enable EXT0 wakeup: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
-    SENSDOT_LOGD(TAG, "EXT0 wakeup enabled on GPIO%d, level=%d", gpio_num, level);
-    return ESP_OK;
-}
-
-/**
- * @brief Enable multiple external wake up sources (limited on ESP32-C3)
- */
-esp_err_t power_enable_ext1_wakeup(uint64_t mask, esp_sleep_ext1_wakeup_mode_t mode)
-{
-    // ESP32-C3 has limited EXT1 support, not implemented for this project
-    SENSDOT_LOGW(TAG, "EXT1 wakeup not used on ESP32-C3, using EXT0 for PIR");
-    return ESP_ERR_NOT_SUPPORTED;
 }
 
 /**
@@ -374,6 +199,12 @@ esp_err_t power_disable_wakeup_source(wakeup_source_t source)
             break;
         case WAKEUP_SOURCE_PIR:
             esp_source = ESP_SLEEP_WAKEUP_EXT0;
+            break;
+        case WAKEUP_SOURCE_BUTTON:
+            esp_source = ESP_SLEEP_WAKEUP_EXT1;
+            break;
+        case WAKEUP_SOURCE_TOUCHPAD:
+            esp_source = ESP_SLEEP_WAKEUP_TOUCHPAD;
             break;
         default:
             return SENSDOT_ERR_INVALID_ARG;
@@ -406,6 +237,43 @@ int power_get_wakeup_gpio(void)
 }
 
 /**
+ * @brief Configure power domain
+ */
+esp_err_t power_configure_domain(power_domain_t domain, esp_sleep_pd_option_t option)
+{
+    esp_sleep_pd_domain_t esp_domain;
+    
+    switch (domain) {
+        case POWER_DOMAIN_RTC_PERIPH:
+            esp_domain = ESP_PD_DOMAIN_RTC_PERIPH;
+            break;
+        case POWER_DOMAIN_RTC_SLOW_MEM:
+            esp_domain = ESP_PD_DOMAIN_RTC_SLOW_MEM;
+            break;
+        case POWER_DOMAIN_RTC_FAST_MEM:
+            esp_domain = ESP_PD_DOMAIN_RTC_FAST_MEM;
+            break;
+        case POWER_DOMAIN_XTAL:
+            esp_domain = ESP_PD_DOMAIN_XTAL;
+            break;
+        case POWER_DOMAIN_CPU:
+            esp_domain = ESP_PD_DOMAIN_CPU;
+            break;
+        default:
+            return SENSDOT_ERR_INVALID_ARG;
+    }
+    
+    esp_err_t ret = esp_sleep_pd_config(esp_domain, option);
+    if (ret != ESP_OK) {
+        SENSDOT_LOGE(TAG, "Failed to configure power domain: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    SENSDOT_LOGD(TAG, "Power domain %d configured with option %d", domain, option);
+    return ESP_OK;
+}
+
+/**
  * @brief Power down peripherals before sleep
  */
 esp_err_t power_down_peripherals(void)
@@ -419,9 +287,7 @@ esp_err_t power_down_peripherals(void)
     gpio_set_level(LED_GPIO, 0);
     gpio_set_level(BUZZER_GPIO, 0);
     
-    // Isolate GPIOs to prevent current leakage during deep sleep
-    esp_sleep_config_gpio_isolate();
-    gpio_deep_sleep_hold_en();
+    // Additional peripheral power down can be added here
     
     return ESP_OK;
 }
@@ -433,10 +299,59 @@ esp_err_t power_up_peripherals(void)
 {
     SENSDOT_LOGD(TAG, "Powering up peripherals");
     
-    // Disable GPIO hold after wake up
-    gpio_deep_sleep_hold_dis();
+    // Peripherals will be powered up as needed by their respective modules
+    // This function is here for future expansion
     
     return ESP_OK;
+}
+
+/**
+ * @brief Set CPU frequency
+ */
+esp_err_t power_set_cpu_freq(uint32_t freq_mhz)
+{
+    // This would require dynamic frequency scaling support
+    // For now, just log the request
+    SENSDOT_LOGI(TAG, "CPU frequency change requested: %lu MHz (not implemented)", freq_mhz);
+    return ESP_OK;
+}
+
+/**
+ * @brief Get CPU frequency
+ */
+uint32_t power_get_cpu_freq(void)
+{
+    return CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
+}
+
+/**
+ * @brief Enable/disable WiFi power saving
+ */
+esp_err_t power_set_wifi_power_save(bool enable)
+{
+    wifi_ps_type_t ps_type = enable ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE;
+    esp_err_t ret = esp_wifi_set_ps(ps_type);
+    if (ret != ESP_OK) {
+        SENSDOT_LOGE(TAG, "Failed to set WiFi power save: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    SENSDOT_LOGI(TAG, "WiFi power save %s", enable ? "enabled" : "disabled");
+    return ESP_OK;
+}
+
+/**
+ * @brief Get WiFi power saving status
+ */
+bool power_get_wifi_power_save(void)
+{
+    wifi_ps_type_t ps_type;
+    esp_err_t ret = esp_wifi_get_ps(&ps_type);
+    if (ret != ESP_OK) {
+        return false;
+    }
+    
+    return ps_type != WIFI_PS_NONE;
 }
 
 /**
@@ -470,7 +385,7 @@ esp_err_t power_get_config(power_config_t *config)
 }
 
 /**
- * @brief Reset power configuration to defaults for ESP32-C3
+ * @brief Reset power configuration to defaults
  */
 esp_err_t power_reset_config(void)
 {
@@ -479,15 +394,15 @@ esp_err_t power_reset_config(void)
     
     g_power_config.wake_interval_sec = device_config->wake_interval_sec;
     g_power_config.enable_timer_wakeup = true;
-    g_power_config.enable_pir_wakeup = true;       // Critical for motion detection
-    g_power_config.enable_button_wakeup = false;   // No button on ESP32-C3 Super Mini
-    g_power_config.power_down_flash = true;        // Aggressive power saving
-    g_power_config.enable_ulp = false;             // ESP32-C3 has no ULP
-    g_power_config.rtc_periph_pd = ESP_PD_OPTION_ON;  // Keep RTC peripherals for PIR
-    g_power_config.rtc_slow_mem_pd = ESP_PD_OPTION_ON; // Keep RTC memory for variables
+    g_power_config.enable_pir_wakeup = true;
+    g_power_config.enable_button_wakeup = false;
+    g_power_config.power_down_flash = false; // Conservative default
+    g_power_config.enable_ulp = false; // Not available on ESP32-C3
+    g_power_config.rtc_periph_pd = ESP_PD_OPTION_AUTO;
+    g_power_config.rtc_slow_mem_pd = ESP_PD_OPTION_ON; // Keep RTC slow memory
     g_power_config.rtc_fast_mem_pd = ESP_PD_OPTION_ON; // Keep RTC fast memory
     
-    SENSDOT_LOGI(TAG, "Power configuration reset to ESP32-C3 defaults");
+    SENSDOT_LOGI(TAG, "Power configuration reset to defaults");
     return ESP_OK;
 }
 
@@ -529,7 +444,7 @@ uint64_t power_get_sleep_time_us(void)
 }
 
 /**
- * @brief Get estimated battery life for ESP32-C3
+ * @brief Get estimated battery life
  */
 uint32_t power_estimate_battery_life(uint32_t battery_capacity_mah, float current_consumption_ma)
 {
@@ -542,19 +457,47 @@ uint32_t power_estimate_battery_life(uint32_t battery_capacity_mah, float curren
 }
 
 /**
- * @brief Calculate average power consumption for ESP32-C3
+ * @brief Calculate average power consumption
  */
 float power_calculate_average_consumption(uint32_t measurement_period_sec)
 {
-    // Optimized values for ESP32-C3
-    float active_time_ratio = 0.005f; // 0.5% active time (very efficient)
-    float active_current_ma = 95.0f;  // ESP32-C3 active consumption
-    float sleep_current_ua = 10.0f;   // ESP32-C3 deep sleep consumption
+    // This is a simplified estimation
+    // In a real implementation, this would measure actual current consumption
+    
+    float active_time_ratio = 0.01f; // Assume 1% active time
+    float active_current_ma = 150.0f; // Active consumption
+    float sleep_current_ua = 15.0f;   // Deep sleep consumption
     
     float average_ma = (active_time_ratio * active_current_ma) + 
                       ((1.0f - active_time_ratio) * sleep_current_ua / 1000.0f);
     
     return average_ma;
+}
+
+/**
+ * @brief Enable ULP coprocessor - NOT AVAILABLE on ESP32-C3
+ */
+esp_err_t power_enable_ulp(const uint32_t *program, size_t program_size)
+{
+    SENSDOT_LOGW(TAG, "ULP coprocessor not available on ESP32-C3");
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+/**
+ * @brief Disable ULP coprocessor - NOT AVAILABLE on ESP32-C3
+ */
+esp_err_t power_disable_ulp(void)
+{
+    SENSDOT_LOGW(TAG, "ULP coprocessor not available on ESP32-C3");
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+/**
+ * @brief Check if ULP is running - NOT AVAILABLE on ESP32-C3
+ */
+bool power_is_ulp_running(void)
+{
+    return false; // ULP not available on ESP32-C3
 }
 
 /**
@@ -591,7 +534,7 @@ esp_err_t power_set_rtc_memory_retention(bool retain_slow_mem, bool retain_fast_
 }
 
 /**
- * @brief Prepare for sleep (optimized for ESP32-C3)
+ * @brief Prepare for sleep
  */
 esp_err_t power_prepare_for_sleep(uint32_t sleep_time_sec, uint32_t sources)
 {
@@ -640,13 +583,32 @@ esp_err_t power_handle_wakeup(void)
 }
 
 /**
+ * @brief Get power domain status
+ */
+esp_sleep_pd_option_t power_get_domain_status(power_domain_t domain)
+{
+    // This would require querying the ESP32 power management
+    // For now, return the configured value
+    switch (domain) {
+        case POWER_DOMAIN_RTC_PERIPH:
+            return g_power_config.rtc_periph_pd;
+        case POWER_DOMAIN_RTC_SLOW_MEM:
+            return g_power_config.rtc_slow_mem_pd;
+        case POWER_DOMAIN_RTC_FAST_MEM:
+            return g_power_config.rtc_fast_mem_pd;
+        default:
+            return ESP_PD_OPTION_AUTO;
+    }
+}
+
+/**
  * @brief Enable/disable automatic light sleep
  */
 esp_err_t power_set_automatic_light_sleep(bool enable, uint32_t min_freq_mhz)
 {
     if (enable) {
         esp_pm_config_t pm_config = {
-            .max_freq_mhz = 160,        // ESP32-C3 max frequency
+            .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
             .min_freq_mhz = min_freq_mhz,
             .light_sleep_enable = true
         };
@@ -672,23 +634,57 @@ esp_err_t power_set_automatic_light_sleep(bool enable, uint32_t min_freq_mhz)
 }
 
 /**
- * @brief Get current power consumption estimate for ESP32-C3
+ * @brief Get current power consumption estimate
  */
 float power_get_current_consumption_estimate(void)
 {
-    // Optimized estimates for ESP32-C3
+    // Simplified estimation based on current mode
     switch (g_current_mode) {
         case POWER_MODE_NORMAL:
-            return 60.0f; // mA (lower than ESP32-S)
-        case POWER_MODE_LOW_POWER:
-            return 20.0f; // mA
-        case POWER_MODE_DEEP_SLEEP:
-            return 0.010f; // mA (10 μA - excellent!)
-        case POWER_MODE_LIGHT_SLEEP:
-            return 0.8f; // mA
-        default:
             return 80.0f; // mA
+        case POWER_MODE_LOW_POWER:
+            return 30.0f; // mA
+        case POWER_MODE_DEEP_SLEEP:
+            return 0.015f; // mA (15 μA)
+        case POWER_MODE_LIGHT_SLEEP:
+            return 1.0f; // mA
+        default:
+            return 100.0f; // mA
     }
+}
+
+/**
+ * @brief Force immediate power saving mode
+ */
+esp_err_t power_force_power_save(void)
+{
+    return power_set_mode(POWER_MODE_LOW_POWER);
+}
+
+/**
+ * @brief Exit power saving mode
+ */
+esp_err_t power_exit_power_save(void)
+{
+    return power_set_mode(POWER_MODE_NORMAL);
+}
+
+/**
+ * @brief Check if device is in power saving mode
+ */
+bool power_is_power_save_active(void)
+{
+    return g_current_mode == POWER_MODE_LOW_POWER || g_current_mode == POWER_MODE_LIGHT_SLEEP;
+}
+
+/**
+ * @brief Set wake up stub function
+ */
+esp_err_t power_set_wake_stub(esp_deep_sleep_wake_stub_fn_t wake_stub)
+{
+    esp_set_deep_sleep_wake_stub(wake_stub);
+    SENSDOT_LOGI(TAG, "Wake stub function set");
+    return ESP_OK;
 }
 
 /**
@@ -696,19 +692,18 @@ float power_get_current_consumption_estimate(void)
  */
 void power_print_info(void)
 {
-    SENSDOT_LOGI(TAG, "=== Power Management Info (ESP32-C3) ===");
+    SENSDOT_LOGI(TAG, "=== Power Management Info ===");
     SENSDOT_LOGI(TAG, "Current Mode: %d", g_current_mode);
     SENSDOT_LOGI(TAG, "Last Wakeup Reason: %d", g_last_wakeup_reason);
-    SENSDOT_LOGI(TAG, "Last Wakeup GPIO: %d", g_last_wakeup_gpio);
     SENSDOT_LOGI(TAG, "Deep Sleep Count: %lu", g_sleep_stats.deep_sleep_count);
     SENSDOT_LOGI(TAG, "Light Sleep Count: %lu", g_sleep_stats.light_sleep_count);
     SENSDOT_LOGI(TAG, "Total Sleep Time: %llu us", g_sleep_stats.total_sleep_time_us);
     SENSDOT_LOGI(TAG, "Wake Interval: %lu sec", g_power_config.wake_interval_sec);
     SENSDOT_LOGI(TAG, "Timer Wakeup: %s", g_power_config.enable_timer_wakeup ? "ON" : "OFF");
     SENSDOT_LOGI(TAG, "PIR Wakeup: %s", g_power_config.enable_pir_wakeup ? "ON" : "OFF");
-    SENSDOT_LOGI(TAG, "Flash Power Down: %s", g_power_config.power_down_flash ? "ON" : "OFF");
-    SENSDOT_LOGI(TAG, "Est. Current: %.3f mA", power_get_current_consumption_estimate());
-    SENSDOT_LOGI(TAG, "=======================================");
+    SENSDOT_LOGI(TAG, "Button Wakeup: %s", g_power_config.enable_button_wakeup ? "ON" : "OFF");
+    SENSDOT_LOGI(TAG, "Est. Current: %.2f mA", power_get_current_consumption_estimate());
+    SENSDOT_LOGI(TAG, "=============================");
 }
 
 /**
@@ -751,4 +746,226 @@ esp_err_t power_get_wakeup_reason_string(wakeup_reason_t reason, char *reason_st
     reason_str[max_len - 1] = '\0';
     
     return ESP_OK;
+}, "Setting power mode: %d", mode);
+    
+    esp_err_t ret = ESP_OK;
+    
+    switch (mode) {
+        case POWER_MODE_NORMAL:
+            // Normal operation - no special power saving
+            ret = esp_pm_configure(NULL); // Disable power management
+            break;
+            
+        case POWER_MODE_LOW_POWER:
+            // Enable automatic light sleep
+            ret = power_set_automatic_light_sleep(true, 80); // Min 80MHz
+            break;
+            
+        case POWER_MODE_DEEP_SLEEP:
+            // This mode is handled by power_enter_deep_sleep()
+            break;
+            
+        case POWER_MODE_LIGHT_SLEEP:
+            // This mode is handled by power_enter_light_sleep()
+            break;
+            
+        default:
+            SENSDOT_LOGE(TAG, "Invalid power mode: %d", mode);
+            return SENSDOT_ERR_INVALID_ARG;
+    }
+    
+    if (ret == ESP_OK) {
+        g_current_mode = mode;
+    }
+    
+    return ret;
 }
+
+/**
+ * @brief Get current power mode
+ */
+power_mode_t power_get_mode(void)
+{
+    return g_current_mode;
+}
+
+/**
+ * @brief Enter deep sleep
+ */
+void power_enter_deep_sleep(uint32_t sleep_time_sec)
+{
+    SENSDOT_LOGI(TAG, "Entering deep sleep for %lu seconds", sleep_time_sec);
+    
+    // Record sleep start time
+    g_last_sleep_start = esp_timer_get_time();
+    g_sleep_stats.last_sleep_time = time(NULL);
+    g_sleep_stats.deep_sleep_count++;
+    
+    // Configure wake up sources based on configuration
+    uint32_t sources = WAKEUP_SOURCE_TIMER;
+    if (g_power_config.enable_pir_wakeup) {
+        sources |= WAKEUP_SOURCE_PIR;
+    }
+    if (g_power_config.enable_button_wakeup) {
+        sources |= WAKEUP_SOURCE_BUTTON;
+    }
+    
+    power_prepare_for_sleep(sleep_time_sec, sources);
+    
+    // Enter deep sleep - this function does not return
+    esp_deep_sleep_start();
+}
+
+/**
+ * @brief Enter light sleep
+ */
+esp_err_t power_enter_light_sleep(uint32_t sleep_time_ms)
+{
+    if (!g_power_initialized) {
+        return SENSDOT_ERR_INVALID_STATE;
+    }
+    
+    SENSDOT_LOGD(TAG, "Entering light sleep for %lu ms", sleep_time_ms);
+    
+    // Record sleep start time
+    uint64_t sleep_start = esp_timer_get_time();
+    g_sleep_stats.light_sleep_count++;
+    
+    // Configure timer wake up
+    esp_err_t ret = esp_sleep_enable_timer_wakeup(sleep_time_ms * 1000ULL);
+    if (ret != ESP_OK) {
+        SENSDOT_LOGE(TAG, "Failed to enable timer wakeup: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // Enter light sleep
+    ret = esp_light_sleep_start();
+    if (ret != ESP_OK) {
+        SENSDOT_LOGE(TAG, "Light sleep failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // Update sleep statistics
+    uint64_t sleep_duration = esp_timer_get_time() - sleep_start;
+    g_sleep_stats.total_sleep_time_us += sleep_duration;
+    
+    SENSDOT_LOGD(TAG, "Light sleep completed, duration: %llu us", sleep_duration);
+    return ESP_OK;
+}
+
+/**
+ * @brief Configure wake up sources
+ */
+esp_err_t power_configure_wakeup_sources(uint32_t sources)
+{
+    esp_err_t ret = ESP_OK;
+    
+    SENSDOT_LOGD(TAG, "Configuring wakeup sources: 0x%lx", sources);
+    
+    // Disable all wakeup sources first
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    
+    // Configure timer wakeup
+    if (sources & WAKEUP_SOURCE_TIMER && g_power_config.enable_timer_wakeup) {
+        ret = power_enable_timer_wakeup(g_power_config.wake_interval_sec);
+        if (ret != ESP_OK) {
+            SENSDOT_LOGE(TAG, "Failed to enable timer wakeup: %s", esp_err_to_name(ret));
+            return ret;
+        }
+    }
+    
+    // Configure PIR sensor wakeup (EXT0)
+    if (sources & WAKEUP_SOURCE_PIR && g_power_config.enable_pir_wakeup) {
+        ret = power_enable_ext0_wakeup(PIR_GPIO, 1); // Wake on HIGH level
+        if (ret != ESP_OK) {
+            SENSDOT_LOGE(TAG, "Failed to enable PIR wakeup: %s", esp_err_to_name(ret));
+            return ret;
+        }
+    }
+    
+    // Configure button wakeup (EXT1) - using BOOT button on GPIO9
+    if (sources & WAKEUP_SOURCE_BUTTON && g_power_config.enable_button_wakeup) {
+        uint64_t button_mask = (1ULL << BOOT_BUTTON_GPIO);
+        ret = power_enable_ext1_wakeup(button_mask, ESP_EXT1_WAKEUP_ALL_LOW);
+        if (ret != ESP_OK) {
+            SENSDOT_LOGE(TAG, "Failed to enable button wakeup: %s", esp_err_to_name(ret));
+            return ret;
+        }
+    }
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief Enable timer wake up
+ */
+esp_err_t power_enable_timer_wakeup(uint32_t time_sec)
+{
+    if (time_sec == 0) {
+        SENSDOT_LOGW(TAG, "Timer wakeup disabled (0 seconds)");
+        return ESP_OK;
+    }
+    
+    uint64_t time_us = (uint64_t)time_sec * 1000000ULL;
+    esp_err_t ret = esp_sleep_enable_timer_wakeup(time_us);
+    if (ret != ESP_OK) {
+        SENSDOT_LOGE(TAG, "Failed to enable timer wakeup: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    SENSDOT_LOGD(TAG, "Timer wakeup enabled for %lu seconds", time_sec);
+    return ESP_OK;
+}
+
+/**
+ * @brief Enable external wake up (PIR sensor)
+ */
+esp_err_t power_enable_ext0_wakeup(gpio_num_t gpio_num, int level)
+{
+    // Configure GPIO as RTC IO if possible
+    if (rtc_gpio_is_valid_gpio(gpio_num)) {
+        rtc_gpio_init(gpio_num);
+        rtc_gpio_set_direction(gpio_num, RTC_GPIO_MODE_INPUT_ONLY);
+        rtc_gpio_pulldown_en(gpio_num);
+        rtc_gpio_pullup_dis(gpio_num);
+    }
+    
+    esp_err_t ret = esp_sleep_enable_ext0_wakeup(gpio_num, level);
+    if (ret != ESP_OK) {
+        SENSDOT_LOGE(TAG, "Failed to enable EXT0 wakeup: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    SENSDOT_LOGD(TAG, "EXT0 wakeup enabled on GPIO%d, level=%d", gpio_num, level);
+    return ESP_OK;
+}
+
+/**
+ * @brief Enable multiple external wake up sources
+ */
+esp_err_t power_enable_ext1_wakeup(uint64_t mask, esp_sleep_ext1_wakeup_mode_t mode)
+{
+    // Configure GPIOs as RTC IO if possible
+    for (int gpio = 0; gpio < 64; gpio++) {
+        if (mask & (1ULL << gpio)) {
+            if (rtc_gpio_is_valid_gpio(gpio)) {
+                rtc_gpio_init(gpio);
+                rtc_gpio_set_direction(gpio, RTC_GPIO_MODE_INPUT_ONLY);
+                if (mode == ESP_EXT1_WAKEUP_ALL_LOW || mode == ESP_EXT1_WAKEUP_ANY_LOW) {
+                    rtc_gpio_pullup_en(gpio);
+                    rtc_gpio_pulldown_dis(gpio);
+                } else {
+                    rtc_gpio_pulldown_en(gpio);
+                    rtc_gpio_pullup_dis(gpio);
+                }
+            }
+        }
+    }
+    
+    esp_err_t ret = esp_sleep_enable_ext1_wakeup(mask, mode);
+    if (ret != ESP_OK) {
+        SENSDOT_LOGE(TAG, "Failed to enable EXT1 wakeup: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    SENSDOT_LOGD(TAG

@@ -1,6 +1,6 @@
 /**
  * @file sensdot_common.h
- * @brief Common definitions, constants and data structures for SensDot project (ESP32-C3 Super Mini)
+ * @brief Common definitions, constants and data structures for SensDot project
  */
 
 #ifndef SENSDOT_COMMON_H
@@ -20,18 +20,18 @@
 #define SENSDOT_VERSION_PATCH 0
 #define SENSDOT_VERSION_STRING "1.0.0"
 
-// GPIO assignments for ESP32-C3 Super Mini
-#define PIR_GPIO          4   // Motion sensor (RTC wake-up capable)
-#define LED_GPIO          1   // Status LED (safe pin)
-#define BUZZER_GPIO       10  // Buzzer/sound signal
-#define SENSOR_PWR_GPIO   3   // Sensor power control
-#define BATTERY_ADC_GPIO  0   // Battery ADC (ADC1_CH0)
-#define I2C_SDA_GPIO      21  // I2C data
-#define I2C_SCL_GPIO      5   // I2C clock
+// GPIO assignments for ESP32-C3 Super Mini (optimized pin mapping)
+#define PIR_GPIO 4                  // Motion sensor (ADC1_CH4, RTC wakeup)
+#define LED_GPIO 1                  // Status LED (safe pin)
+#define BUZZER_GPIO 10              // Buzzer/sound alarm (PWM capable)
+#define SENSOR_PWR_GPIO 3           // Sensor power control
+#define BATTERY_ADC_GPIO 0          // Battery voltage ADC (ADC1_CH0)
+#define I2C_SDA_GPIO 21             // I2C data for BME280/BH1750
+#define I2C_SCL_GPIO 5              // I2C clock for sensors
 
-// Built-in hardware on ESP32-C3 Super Mini
-#define BUILTIN_LED_GPIO  8   // Built-in LED (inverted logic)
-#define BOOT_BUTTON_GPIO  9   // Built-in BOOT button (optional for user input)
+// Built-in buttons on ESP32-C3 Super Mini
+#define BOOT_BUTTON_GPIO 9          // Built-in BOOT button (can be used as user input)
+// Note: Hardware RESET button is connected to EN pin (not GPIO)
 
 // I2C configuration
 #define I2C_MASTER_NUM 0
@@ -39,7 +39,7 @@
 
 // Battery monitoring for ESP32-C3
 #define BATT_DIVIDER_RATIO (CONFIG_SENS_VOLTAGE_DIVIDER_RATIO / 100.0f)
-#define ADC_CHANNEL ADC1_CHANNEL_0  // GPIO0 on ESP32-C3
+#define ADC_CHANNEL ADC1_CHANNEL_0  // GPIO0 -> ADC1_CH0
 
 // Timing constants
 #define SETUP_TIMEOUT_MS (CONFIG_SENS_SETUP_TIMEOUT_MIN * 60 * 1000)
@@ -64,7 +64,6 @@
 #define NVS_ALARM_HOLD "alarm_hold"
 #define NVS_LOW_BATT_THRESH "low_batt_thresh"
 #define NVS_RETRY_SLEEP_SEC "retry_sleep_sec"
-#define NVS_BATTERY_DIVIDER "batt_divider"
 #define NVS_CONFIGURED "configured"
 
 // String length limits
@@ -117,7 +116,6 @@ typedef struct {
     int alarm_hold_sec;
     float low_batt_threshold;
     int retry_sleep_sec;        // Sleep interval when retrying after errors
-    bool battery_divider_enabled;  // Battery voltage divider present
     bool configured;
 } device_config_t;
 
@@ -180,7 +178,6 @@ typedef enum {
 #define DEFAULT_WAKE_INTERVAL_SEC CONFIG_SENS_WAKE_INTERVAL_SEC
 #define DEFAULT_ALARM_HOLD_SEC CONFIG_SENS_ALARM_HOLD_SEC
 #define DEFAULT_LOW_BATT_THRESHOLD (CONFIG_SENS_LOW_BATT_THRESHOLD / 1000.0f)
-#define DEFAULT_BATTERY_DIVIDER_ENABLED CONFIG_SENS_BATTERY_DIVIDER_DEFAULT
 #define DEFAULT_MQTT_PREFIX "sensdot"
 #define DEFAULT_MQTT_URI "mqtt://192.168.1.100:1883"
 #define DEFAULT_RETRY_SLEEP_SEC 60  // Default retry sleep interval

@@ -8,7 +8,9 @@
 
 #include "sensdot_common.h"
 #include "driver/i2c.h"
-#include "driver/adc.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h" 
+#include "esp_adc/adc_cali_scheme.h"
 #include "driver/gpio.h"
 
 #ifdef __cplusplus
@@ -196,10 +198,10 @@ time_t sensor_get_last_motion_time(void);
 
 /**
  * @brief Check if battery is low
- * @param threshold Low battery threshold in volts
+ * @param voltage Current battery voltage
  * @return true if battery is low, false otherwise
  */
-bool sensor_is_battery_low(float threshold);
+bool sensor_is_battery_low(float voltage);
 
 /**
  * @brief Get battery percentage estimate

@@ -1,15 +1,16 @@
 /**
  * @file power_management.h
- * @brief Power management and sleep functionality for ESP32-C3 (no ULP)
+ * @brief Power management and sleep functionality
  */
 
 #ifndef POWER_MANAGEMENT_H
 #define POWER_MANAGEMENT_H
 
 #include "sensdot_common.h"
-#include "esp_sleep.h"
+#include "esp_sleep.h"       // Updated include
 #include "esp_pm.h"
 #include "driver/rtc_io.h"
+#include "soc/rtc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,12 +24,13 @@ typedef enum {
     POWER_MODE_LIGHT_SLEEP
 } power_mode_t;
 
-// Wake up sources (ESP32-C3 specific)
+// Wake up sources
 typedef enum {
     WAKEUP_SOURCE_TIMER = BIT0,
     WAKEUP_SOURCE_PIR = BIT1,
-    // Note: ESP32-C3 has limited wake-up sources compared to ESP32-S
-    // ULP and some other sources not available
+    WAKEUP_SOURCE_BUTTON = BIT2,
+    WAKEUP_SOURCE_UART = BIT3,
+    WAKEUP_SOURCE_TOUCHPAD = BIT4
 } wakeup_source_t;
 
 // Power domain configuration
@@ -37,8 +39,9 @@ typedef enum {
     POWER_DOMAIN_RTC_SLOW_MEM,
     POWER_DOMAIN_RTC_FAST_MEM,
     POWER_DOMAIN_XTAL,
-    POWER_DOMAIN_CPU
-    // Note: ESP32-C3 has fewer power domains than ESP32-S
+    POWER_DOMAIN_CPU,
+    POWER_DOMAIN_WIFI,
+    POWER_DOMAIN_BT
 } power_domain_t;
 
 // Sleep statistics
@@ -52,21 +55,21 @@ typedef struct {
     time_t last_wakeup_time;
 } sleep_stats_t;
 
-// Power configuration (optimized for ESP32-C3)
+// Power configuration
 typedef struct {
     uint32_t wake_interval_sec;
     bool enable_timer_wakeup;
-    bool enable_pir_wakeup;        // Critical for motion detection
-    bool enable_button_wakeup;     // Not used on ESP32-C3 Super Mini
-    bool power_down_flash;         // Flash power down for ultra-low power
-    bool enable_ulp;               // Always false for ESP32-C3
+    bool enable_pir_wakeup;
+    bool enable_button_wakeup;
+    bool power_down_flash;
+    bool enable_ulp;
     esp_sleep_pd_option_t rtc_periph_pd;
     esp_sleep_pd_option_t rtc_slow_mem_pd;
     esp_sleep_pd_option_t rtc_fast_mem_pd;
 } power_config_t;
 
 /**
- * @brief Initialize power management for ESP32-C3
+ * @brief Initialize power management
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t power_management_init(void);
@@ -91,7 +94,7 @@ esp_err_t power_set_mode(power_mode_t mode);
 power_mode_t power_get_mode(void);
 
 /**
- * @brief Enter deep sleep (main sleep mode for ESP32-C3)
+ * @brief Enter deep sleep
  * @param sleep_time_sec Sleep time in seconds (0 for indefinite)
  * @return This function does not return on success
  */
@@ -105,7 +108,7 @@ void power_enter_deep_sleep(uint32_t sleep_time_sec);
 esp_err_t power_enter_light_sleep(uint32_t sleep_time_ms);
 
 /**
- * @brief Configure wake up sources for ESP32-C3
+ * @brief Configure wake up sources
  * @param sources Bitfield of wake up sources to enable
  * @return ESP_OK on success, error code otherwise
  */
@@ -119,18 +122,18 @@ esp_err_t power_configure_wakeup_sources(uint32_t sources);
 esp_err_t power_enable_timer_wakeup(uint32_t time_sec);
 
 /**
- * @brief Enable external wake up (PIR sensor) - critical for ESP32-C3
- * @param gpio_num GPIO number for external wake up (must be RTC GPIO)
+ * @brief Enable external wake up (PIR sensor)
+ * @param gpio_num GPIO number for external wake up
  * @param level Trigger level (0 or 1)
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t power_enable_ext0_wakeup(gpio_num_t gpio_num, int level);
 
 /**
- * @brief Enable multiple external wake up sources (limited on ESP32-C3)
+ * @brief Enable multiple external wake up sources
  * @param mask GPIO mask for external wake up
- * @param mode Wake up mode
- * @return ESP_ERR_NOT_SUPPORTED on ESP32-C3
+ * @param mode Wake up mode (any high, any low, all low)
+ * @return ESP_OK on success, error code otherwise
  */
 esp_err_t power_enable_ext1_wakeup(uint64_t mask, esp_sleep_ext1_wakeup_mode_t mode);
 
@@ -154,6 +157,14 @@ wakeup_reason_t power_get_wakeup_reason(void);
 int power_get_wakeup_gpio(void);
 
 /**
+ * @brief Configure power domain
+ * @param domain Power domain to configure
+ * @param option Power domain option
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t power_configure_domain(power_domain_t domain, esp_sleep_pd_option_t option);
+
+/**
  * @brief Power down peripherals before sleep
  * @return ESP_OK on success, error code otherwise
  */
@@ -164,6 +175,32 @@ esp_err_t power_down_peripherals(void);
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t power_up_peripherals(void);
+
+/**
+ * @brief Set CPU frequency
+ * @param freq_mhz CPU frequency in MHz
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t power_set_cpu_freq(uint32_t freq_mhz);
+
+/**
+ * @brief Get CPU frequency
+ * @return CPU frequency in MHz
+ */
+uint32_t power_get_cpu_freq(void);
+
+/**
+ * @brief Enable/disable WiFi power saving
+ * @param enable true to enable power saving, false to disable
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t power_set_wifi_power_save(bool enable);
+
+/**
+ * @brief Get WiFi power saving status
+ * @return true if enabled, false if disabled
+ */
+bool power_get_wifi_power_save(void);
 
 /**
  * @brief Set power configuration
@@ -180,7 +217,7 @@ esp_err_t power_set_config(const power_config_t *config);
 esp_err_t power_get_config(power_config_t *config);
 
 /**
- * @brief Reset power configuration to ESP32-C3 defaults
+ * @brief Reset power configuration to defaults
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t power_reset_config(void);
@@ -218,11 +255,31 @@ uint64_t power_get_sleep_time_us(void);
 uint32_t power_estimate_battery_life(uint32_t battery_capacity_mah, float current_consumption_ma);
 
 /**
- * @brief Calculate average power consumption for ESP32-C3
+ * @brief Calculate average power consumption
  * @param measurement_period_sec Measurement period in seconds
  * @return Average power consumption in mA
  */
 float power_calculate_average_consumption(uint32_t measurement_period_sec);
+
+/**
+ * @brief Enable ULP (Ultra Low Power) coprocessor - NOT AVAILABLE on ESP32-C3
+ * @param program ULP program to load
+ * @param program_size Size of ULP program
+ * @return ESP_ERR_NOT_SUPPORTED - ULP not available on ESP32-C3
+ */
+esp_err_t power_enable_ulp(const uint32_t *program, size_t program_size);
+
+/**
+ * @brief Disable ULP coprocessor - NOT AVAILABLE on ESP32-C3
+ * @return ESP_ERR_NOT_SUPPORTED - ULP not available on ESP32-C3
+ */
+esp_err_t power_disable_ulp(void);
+
+/**
+ * @brief Check if ULP is running - NOT AVAILABLE on ESP32-C3  
+ * @return false - ULP not available on ESP32-C3
+ */
+bool power_is_ulp_running(void);
 
 /**
  * @brief Set RTC memory retention
@@ -247,6 +304,13 @@ esp_err_t power_prepare_for_sleep(uint32_t sleep_time_sec, uint32_t sources);
 esp_err_t power_handle_wakeup(void);
 
 /**
+ * @brief Get power domain status
+ * @param domain Power domain to check
+ * @return Power domain option currently set
+ */
+esp_sleep_pd_option_t power_get_domain_status(power_domain_t domain);
+
+/**
  * @brief Enable/disable automatic light sleep
  * @param enable true to enable automatic light sleep, false to disable
  * @param min_freq_mhz Minimum CPU frequency for light sleep
@@ -255,7 +319,7 @@ esp_err_t power_handle_wakeup(void);
 esp_err_t power_set_automatic_light_sleep(bool enable, uint32_t min_freq_mhz);
 
 /**
- * @brief Get current power consumption estimate for ESP32-C3
+ * @brief Get current power consumption estimate
  * @return Estimated current consumption in mA
  */
 float power_get_current_consumption_estimate(void);
