@@ -45,7 +45,16 @@ menu "SensDot Configuration"
         range 100 500
         help
             Voltage divider ratio multiplied by 100. Default 200 = 2.0 ratio.
+            Only used when battery_divider_enabled = true in configuration.
             Adjust based on your hardware design.
+
+    config SENS_BATTERY_DIVIDER_DEFAULT
+        bool "Enable battery voltage divider by default"
+        default n
+        help
+            Set default state for battery voltage divider.
+            Can be changed via web interface.
+            Select 'n' for ESP32-C3 Super Mini without external divider.
 
     config SENS_MAX_WIFI_RETRIES
         int "Maximum WiFi connection retries before entering setup"
@@ -62,5 +71,13 @@ menu "SensDot Configuration"
         help
             Send Home Assistant MQTT discovery messages every N boots.
             Set to 1 to send on every boot (more reliable but uses more power).
+
+    config SENS_RETRY_SLEEP_SEC
+        int "Default retry sleep interval (seconds)"
+        default 60
+        range 30 600
+        help
+            Default sleep interval when retrying after connection errors.
+            Can be changed via web interface. Range 30 seconds - 10 minutes.
 
 endmenu

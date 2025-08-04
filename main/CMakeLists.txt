@@ -1,8 +1,20 @@
-# main/CMakeLists.txt for SensDot
+# main/CMakeLists.txt for SensDot ESP32-C3 Super Mini
 
 idf_component_register(
-    SRCS "main.c"
-    INCLUDE_DIRS "."
+    SRCS 
+        "main.c"
+        "config.c"
+        "sensors.c"
+        "wifi_manager.c"
+        "mqtt_client.c"
+        "web_server.c"
+        "power_management.c"
+        "indicators.c"
+    
+    INCLUDE_DIRS 
+        "."
+        "../components"
+    
     REQUIRES 
         # Core ESP-IDF components
         esp_common
@@ -31,11 +43,13 @@ idf_component_register(
         # Sleep and power management
         esp_pm
         
-        # ADC for battery monitoring
+        # ADC for battery monitoring (ESP32-C3)
         esp_adc
         
-        # I2C for sensors (if using esp-idf-lib)
-        # i2cdev
+        # esp-idf-lib sensor components
+        bme280
+        bh1750
+        i2cdev
         
     PRIV_REQUIRES
         # Private requirements
