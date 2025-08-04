@@ -45,16 +45,7 @@ menu "SensDot Configuration"
         range 100 500
         help
             Voltage divider ratio multiplied by 100. Default 200 = 2.0 ratio.
-            Only used when battery_divider_enabled = true in configuration.
             Adjust based on your hardware design.
-
-    config SENS_BATTERY_DIVIDER_DEFAULT
-        bool "Enable battery voltage divider by default"
-        default n
-        help
-            Set default state for battery voltage divider.
-            Can be changed via web interface.
-            Select 'n' for ESP32-C3 Super Mini without external divider.
 
     config SENS_MAX_WIFI_RETRIES
         int "Maximum WiFi connection retries before entering setup"

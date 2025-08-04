@@ -38,17 +38,40 @@
 #define I2C_MASTER_FREQ_HZ 100000
 
 // Battery monitoring for ESP32-C3
+#ifdef CONFIG_SENS_VOLTAGE_DIVIDER_RATIO
 #define BATT_DIVIDER_RATIO (CONFIG_SENS_VOLTAGE_DIVIDER_RATIO / 100.0f)
+#else
+#define BATT_DIVIDER_RATIO 2.0f
+#endif
+
 #define ADC_CHANNEL ADC1_CHANNEL_0  // GPIO0 -> ADC1_CH0
 
-// Timing constants
+// Timing constants with fallbacks
+#ifdef CONFIG_SENS_SETUP_TIMEOUT_MIN
 #define SETUP_TIMEOUT_MS (CONFIG_SENS_SETUP_TIMEOUT_MIN * 60 * 1000)
+#else
+#define SETUP_TIMEOUT_MS (10 * 60 * 1000)  // 10 minutes default
+#endif
+
+#ifdef CONFIG_SENS_MAX_WIFI_RETRIES
 #define MAX_WIFI_RETRIES CONFIG_SENS_MAX_WIFI_RETRIES
+#else
+#define MAX_WIFI_RETRIES 5
+#endif
+
+#ifdef CONFIG_SENS_MQTT_DISCOVERY_INTERVAL
 #define MQTT_DISCOVERY_INTERVAL CONFIG_SENS_MQTT_DISCOVERY_INTERVAL
+#else
+#define MQTT_DISCOVERY_INTERVAL 10
+#endif
 
 // Setup mode constants  
 #define SETUP_AP_SSID_PREFIX "SensDot-Setup-"
+#ifdef CONFIG_SENS_SETUP_AP_PASSWORD
 #define SETUP_AP_PASSWORD CONFIG_SENS_SETUP_AP_PASSWORD
+#else
+#define SETUP_AP_PASSWORD "sensdot123"
+#endif
 #define SETUP_AP_MAX_CONNECTIONS 1
 #define SETUP_AP_IP "192.168.4.1"
 
@@ -79,6 +102,7 @@ typedef enum {
     DEVICE_STATE_INIT,
     DEVICE_STATE_SETUP,
     DEVICE_STATE_CONNECTING,
+    DEVICE_STATE_CONNECTED,        // Added missing state
     DEVICE_STATE_NORMAL,
     DEVICE_STATE_SLEEP,
     DEVICE_STATE_ERROR
@@ -149,9 +173,7 @@ typedef enum {
     STATUS_FACTORY_RESET = 5    // 5 blinks
 } status_pattern_t;
 
-// Logging macros with module tags
-#define LOG_LOCAL_LEVEL ESP_LOG_INFO
-
+// Logging macros with module tags - remove LOG_LOCAL_LEVEL redefinition
 #define SENSDOT_LOGE(tag, format, ...) ESP_LOGE(tag, format, ##__VA_ARGS__)
 #define SENSDOT_LOGW(tag, format, ...) ESP_LOGW(tag, format, ##__VA_ARGS__)
 #define SENSDOT_LOGI(tag, format, ...) ESP_LOGI(tag, format, ##__VA_ARGS__)
@@ -174,13 +196,33 @@ typedef enum {
 #define SECONDS_TO_US(sec) ((sec) * 1000000ULL)
 #define MINUTES_TO_MS(min) ((min) * 60 * 1000)
 
-// Default configuration values
+// Default configuration values with fallbacks
+#ifdef CONFIG_SENS_WAKE_INTERVAL_SEC
 #define DEFAULT_WAKE_INTERVAL_SEC CONFIG_SENS_WAKE_INTERVAL_SEC
+#else
+#define DEFAULT_WAKE_INTERVAL_SEC 300
+#endif
+
+#ifdef CONFIG_SENS_ALARM_HOLD_SEC
 #define DEFAULT_ALARM_HOLD_SEC CONFIG_SENS_ALARM_HOLD_SEC
+#else
+#define DEFAULT_ALARM_HOLD_SEC 60
+#endif
+
+#ifdef CONFIG_SENS_LOW_BATT_THRESHOLD
 #define DEFAULT_LOW_BATT_THRESHOLD (CONFIG_SENS_LOW_BATT_THRESHOLD / 1000.0f)
+#else
+#define DEFAULT_LOW_BATT_THRESHOLD 3.3f
+#endif
+
 #define DEFAULT_MQTT_PREFIX "sensdot"
 #define DEFAULT_MQTT_URI "mqtt://192.168.1.100:1883"
-#define DEFAULT_RETRY_SLEEP_SEC 60  // Default retry sleep interval
+
+#ifdef CONFIG_SENS_RETRY_SLEEP_SEC  
+#define DEFAULT_RETRY_SLEEP_SEC CONFIG_SENS_RETRY_SLEEP_SEC
+#else
+#define DEFAULT_RETRY_SLEEP_SEC 60
+#endif
 
 // Hardware validation macros
 #define CHECK_GPIO_VALID(gpio) do { \
