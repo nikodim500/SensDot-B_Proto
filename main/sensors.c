@@ -416,7 +416,8 @@ esp_err_t sensors_power_on(void)
     
     // Turn on sensor power
     gpio_set_level(SENSOR_PWR_GPIO, 1);
-    g_sensors_powered = true;
+    vTaskDelay(pdMS_TO_TICKS(10)); // allow sensor power rail to stabilize
+g_sensors_powered = true;
     
     // Wait for sensors to stabilize (longer for BMP280/BME280)
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -589,10 +590,42 @@ esp_err_t sensor_read_battery(battery_data_t *data)
     
     esp_err_t ret;
     int raw_value;
+    // Take 8 samples and use median to reduce noise
+    const int SAMPLES = 8;
+    int buf[SAMPLES];
+    for (int i = 0; i < SAMPLES; ++i) {
+        ret = adc_oneshot_read(g_adc_handle, ADC_CHANNEL, &buf[i]);
+        if (ret != ESP_OK) {
+            SENSDOT_LOGE(TAG, "ADC read failed: %s", esp_err_to_name(ret));
+            data->status = SENSOR_STATUS_ERROR;
+            return ret;
+        }
+        ets_delay_us(200); // small delay between samples
+    }
+    // simple insertion sort
+    for (int i = 1; i < SAMPLES; ++i) {
+        int key = buf[i];
+        int j = i - 1;
+        while (j >= 0 && buf[j] > key) {
+            buf[j+1] = buf[j];
+            --j;
+        }
+        buf[j+1] = key;
+    }
+    raw_value = buf[SAMPLES/2];
+    // Continue with existing conversion using raw_value
+
+    }
+    // sort for median
+    for (int i = 0; i < SAMPLES-1; ++i) {
+        for (int j = i+1; j < SAMPLES; ++j) {
+            if (buf[j] < buf[i]) { int t = buf[i]; buf[i] = buf[j]; buf[j] = t; }
+        }
+    }
+    raw_value = (SAMPLES % 2) ? buf[SAMPLES/2] : (buf[SAMPLES/2-1] + buf[SAMPLES/2]) / 2;
     
-    // Read raw ADC value
-    ret = adc_oneshot_read(g_adc_handle, ADC_CHANNEL, &raw_value);
-    if (ret != ESP_OK) {
+    if (false) {
+
         SENSDOT_LOGE(TAG, "ADC read failed: %s", esp_err_to_name(ret));
         data->status = SENSOR_STATUS_ERROR;
         return ret;

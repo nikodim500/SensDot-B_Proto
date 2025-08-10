@@ -10,6 +10,8 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "driver/gpio.h"
+#include "wifi_manager.h"
+#include "mqtt_client.h"
 
 static const char *TAG = "power_mgr";
 
@@ -151,6 +153,20 @@ esp_err_t power_management_init(void)
     if (ret != ESP_OK) {
         return ret;
     }
+    
+    // Stop higher-level services before sleep to reduce spikes
+    mqtt_client_stop();
+    wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Hold critical GPIO levels during deep sleep (prevent MOSFET gate float, etc.)
+    gpio_hold_en(SENSOR_PWR_GPIO);
+    gpio_hold_en(LED_GPIO);
+    gpio_hold_en(BUZZER_GPIO);
+    gpio_deep_sleep_hold_en();
+    
+    // Optionally isolate unused noisy GPIOs (safe defaults)
+    // esp_sleep_gpio_isolate(GPIO_NUM_2);
     
     g_power_initialized = true;
     g_current_mode = POWER_MODE_NORMAL;

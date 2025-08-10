@@ -168,7 +168,9 @@ static esp_err_t enter_setup_mode(void)
     }
     
     // Start WiFi in AP mode
-    ret = wifi_start_ap(unique_ssid, SETUP_AP_PASSWORD);
+    char ap_pass[16];
+    generate_ap_password(ap_pass, sizeof(ap_pass));
+    ret = wifi_start_ap(unique_ssid, ap_pass);
     if (ret != ESP_OK) {
         SENSDOT_LOGE(TAG, "Failed to start WiFi AP: %s", esp_err_to_name(ret));
         return ret;
@@ -482,4 +484,15 @@ void app_main(void)
     // Should not reach here in normal operation
     SENSDOT_LOGW(TAG, "Unexpected end of main function");
     esp_restart();
+}
+
+static void generate_ap_password(char *out, size_t len)
+{
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    // Pattern: S + 6 hex chars + 2 checksum chars (len >= 10)
+    uint32_t v = (mac[2]<<16) | (mac[3]<<8) | mac[4];
+    uint8_t csum = 0;
+    for (int i=0;i<6;i++) csum ^= mac[i];
+    snprintf(out, len, "S%06X%02X", (unsigned)v & 0xFFFFFFu, (unsigned)csum);
 }
